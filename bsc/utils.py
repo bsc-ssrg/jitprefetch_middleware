@@ -1,9 +1,22 @@
+from datetime import datetime as dt
+
 class Singleton(type):
     _instances = {}
     def __call__(cls, *args, **kwargs):  # @NoSelf
         if cls not in cls._instances:
             cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
         return cls._instances[cls]
+
+class NoDaemonProcess(multiprocessing.Process):
+    # make 'daemon' attribute always return False
+    def _get_daemon(self):
+        return False
+    def _set_daemon(self, value):
+        pass
+    daemon = property(_get_daemon, _set_daemon)
+
+class NoDaemonPool(multiprocessing.pool.Pool):
+    Process = NoDaemonProcess
 
 class ChainObject():
 
@@ -31,7 +44,7 @@ class ChainObject():
                 self.time_stamp = ts
 
     def id(self):
-
+        return self.object_id
 
 class ProbObject():
     def __init__(self, container, name, prob, ts=0):

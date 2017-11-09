@@ -11,13 +11,12 @@ import cPickle as pickle
 import multiprocessing.pool
 from itertools import chain
 from swift.common import wsgi
-from utils import Singleton, Chain
-from datetime import datetime as dt
 from swift.common.swob import wsgify
 from swift.common.swob import Response
 from sys import argv, getsizeof, stderr
 from swift.common.utils import split_path
 from collections import deque, OrderedDict
+from utils import Singleton, Chain, NoDaemonPool
 from swift.common.internal_client import InternalClient
 from swiftclient.service import SwiftService, SwiftError
 
@@ -49,9 +48,14 @@ class JITPrefetchMiddleware(object):
 
     def __init__(self, app, *args, **kwargs):
         self.app = app
-        self.th = float(kwargs.get('probthreshold', '0.5'))
-        self.chain = Chain(CHAINSAVE, TOTALSECONDS, self.th)
-      
+        self.th = float(kwargs.get('probthreshold', '0.5')) #minimum probability to be prefetched
+        self.totalseconds = float(kwargs.get('totalseconds', '60')) #allowed time diff in seconds between previous and next object
+        self.chainsave = kwargs.get('chainsave', '/tmp/chain.p') #where to save the chain
+        self.nthreads = int(kwargs.get('nthreads', '5')) #number of threads in the download threadpool
+        
+        self.chain = Chain(self.chainsave, self.totalseconds, self.th)
+        self.pool = NoDaemonPool(processes=self.nthreads)
+
     @wsgify
     def __call__(self, request):
         try:
@@ -72,7 +76,11 @@ class JITPrefetchMiddleware(object):
 
 
 def filter_factory(global_config, **local_config):
-    probthreshold = local_config.get('probthreshold')
+    totalseconds = local_config.get('totalseconds') #allowed time diff in seconds between previous and next object
+    chainsave = local_config.get('chainsave') #where to save the chain
+    probthreshold = local_config.get('probthreshold') #minimum probability to be prefetched
+    nthreads = local_config.get('nthreads') #number of threads in the download threadpool
     def factory(app):
-        return JITPrefetchMiddleware(app, probthreshold=probthreshold)
+        return JITPrefetchMiddleware(app, probthreshold=probthreshold, totalseconds=totalseconds,
+            chainsave=chainsave, nthreads=nthreads)
     return factory
