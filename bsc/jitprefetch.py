@@ -5,7 +5,7 @@ from swift.common.swob import wsgify
 from swift.common.utils import split_path
 
 
-class PrefetchMiddleware(object):
+class JITPrefetchMiddleware(object):
     def __init__(self, app, *args, **kwargs):
         self.app = app
       
@@ -31,5 +31,5 @@ class PrefetchMiddleware(object):
 
 def filter_factory(global_config, **local_config):
     def factory(app):
-        return PrefetchMiddleware(app)
+        return JITPrefetchMiddleware(app)
     return factory
