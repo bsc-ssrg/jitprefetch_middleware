@@ -61,10 +61,15 @@ class JITPrefetchMiddleware(object):
         if 'HTTP_X_NO_PREFETCH' not in request.environ:
             if request.method == 'GET':
                 oid = (hashlib.md5(request.path_info).hexdigest())
+                self.add_object_to_chain(oid, container, objname)
 
 
 
         return self.app
+
+    def add_object_to_chain(self, oid, container, object_name):
+        self.chain.add(oid, object_name, container)
+
 
 def filter_factory(global_config, **local_config):
     probthreshold = local_config.get('probthreshold')

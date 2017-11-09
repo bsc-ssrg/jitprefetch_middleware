@@ -5,6 +5,33 @@ class Singleton(type):
             cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
         return cls._instances[cls]
 
+class ChainObject():
+
+    def __init__(self, id, name, container, ts):
+        self.object_id = id
+        self.object_name = name
+        self.object_container = container
+        self.hits = 1
+        self.time_stamp = ''
+        self.set_ts(ts)
+
+    def object_to_string(self):
+        return "ID:" + self.object_id + " HITS:" + str(self.hits) + " TS:" + str(self.time_stamp.total_seconds())
+
+    def get_object_name(self):
+        return self.object_container + " " + self.object_name
+
+    def hit(self):
+        self.hits += 1  
+
+    def set_ts(self, ts):
+        if not self.time_stamp:
+            self.time_stamp = ts
+        elif ts.total_seconds() < self.time_stamp.total_seconds():
+                self.time_stamp = ts
+
+    def id(self):
+
 
 class ProbObject():
     def __init__(self, container, name, prob, ts=0):
