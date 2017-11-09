@@ -49,6 +49,7 @@ class JITPrefetchMiddleware(object):
 
     def __init__(self, app, *args, **kwargs):
         self.app = app
+        PROB_THRESHOLD = float(kwargs.get('probthreshold', '0.5'))
       
     @wsgify
     def __call__(self, request):
@@ -58,7 +59,7 @@ class JITPrefetchMiddleware(object):
             return self.app
 
         if request.method == 'GET':
-            print "hola mundo"
+            print "hola mundo " + str(PROB_THRESHOLD)
        
 
 
