@@ -9,9 +9,9 @@ import threading
 import multiprocessing
 import cPickle as pickle
 import multiprocessing.pool
-from utils import Singleton
 from itertools import chain
 from swift.common import wsgi
+from utils import Singleton, Chain
 from datetime import datetime as dt
 from swift.common.swob import wsgify
 from swift.common.swob import Response
@@ -50,6 +50,7 @@ class JITPrefetchMiddleware(object):
     def __init__(self, app, *args, **kwargs):
         self.app = app
         self.th = float(kwargs.get('probthreshold', '0.5'))
+        self.chain = Chain(CHAINSAVE, TOTALSECONDS, self.th)
       
     @wsgify
     def __call__(self, request):
@@ -57,15 +58,11 @@ class JITPrefetchMiddleware(object):
             (version, account, container, objname) = split_path(request.path_info, 4, 4, True)
         except ValueError:
             return self.app
+        if 'HTTP_X_NO_PREFETCH' not in request.environ:
+            if request.method == 'GET':
+                oid = (hashlib.md5(request.path_info).hexdigest())
 
-        if request.method == 'GET':
-            print "hola mundo " + str(self.th)
-       
 
-
-        if request.method == 'DELETE':
-            sub = wsgi.make_subrequest(request.environ, path=preview_path)
-            sub.get_response(self.app)
 
         return self.app
 
