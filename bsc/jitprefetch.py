@@ -68,7 +68,10 @@ class JITPrefetchMiddleware(object):
                 if PREFETCH:
                     data, rheaders = self.get_prefetched(oid, objname)
                     self.prefetch_objects(oid, request)
-
+                    if data:
+                        request.response_headers = rheaders
+                        request.response_headers['X-object-prefetched'] = 'True'
+                        return iter(data)
 
 
         return self.app
@@ -145,7 +148,7 @@ class Downloader(object):
         self.log_results(self.oid, data, head, end_time, diff)
 
 
-    def log_result(oid, data, headers, ts, diff):
+    def log_results(self, oid, data, headers, ts, diff):
         if data:
             while total_size(prefetched_objects) > MAX_PREFETCHED_SIZE:
                 print "MAX PREFETCHED SIZE: Deleting objects..."
