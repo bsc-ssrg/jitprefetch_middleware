@@ -6,7 +6,6 @@ import urllib2
 import StringIO
 import itertools
 import threading
-import multiprocessing.pool
 from itertools import chain
 from swift.common import wsgi
 from swift.common.swob import wsgify
@@ -14,7 +13,8 @@ from swift.common.swob import Response
 from sys import argv, getsizeof, stderr
 from swift.common.utils import split_path
 from collections import deque, OrderedDict
-from utils import Singleton, Chain, NoDaemonPool
+from utils import Singleton, Chain, DummyTask
+from swift.common.utils import GreenAsyncPile
 from swift.common.internal_client import InternalClient
 from swiftclient.service import SwiftService, SwiftError
 
@@ -52,7 +52,7 @@ class JITPrefetchMiddleware(object):
         self.nthreads = int(kwargs.get('nthreads', '5')) #number of threads in the download threadpool
         
         self.chain = Chain(self.chainsave, self.totalseconds, self.th)
-        #self.pool = NoDaemonPool(processes=self.nthreads)
+        self.pool = GreenAsyncPile(self.nthreads)
 
     @wsgify
     def __call__(self, request):
@@ -64,6 +64,7 @@ class JITPrefetchMiddleware(object):
             if request.method == 'GET':
                 oid = (hashlib.md5(request.path_info).hexdigest())
                 self.add_object_to_chain(oid, container, objname)
+                self.pool.spawn(DummyTask().run)
 
 
 

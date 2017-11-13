@@ -1,4 +1,5 @@
 import cPickle as pickle
+import time
 from datetime import datetime as dt
 
 class Singleton(type):
@@ -7,6 +8,16 @@ class Singleton(type):
         if cls not in cls._instances:
             cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
         return cls._instances[cls]
+
+class DummyTask(object):
+
+    def run(self):
+        print "Sleeping..."
+        time.sleep(10)
+        print "Wake up!"
+
+
+
 
 
 class ChainObject():
