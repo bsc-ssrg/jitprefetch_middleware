@@ -13,7 +13,7 @@ from swift.common.swob import Response
 from sys import argv, getsizeof, stderr
 from swift.common.utils import split_path
 from collections import deque, OrderedDict
-from utils import Singleton, Chain, DummyTask
+from utils import Singleton, Chain, Downloader
 from swift.common.utils import GreenAsyncPile
 from swift.common.internal_client import InternalClient
 from swiftclient.service import SwiftService, SwiftError
@@ -64,7 +64,9 @@ class JITPrefetchMiddleware(object):
             if request.method == 'GET':
                 oid = (hashlib.md5(request.path_info).hexdigest())
                 self.add_object_to_chain(oid, container, objname)
-                self.pool.spawn(DummyTask(20).run)
+                if PREFETCH:
+                    data, rheaders = self.get_prefetched(oid, objname)
+                    self.prefetch_objects(oid, request)
 
 
 
@@ -72,6 +74,37 @@ class JITPrefetchMiddleware(object):
 
     def add_object_to_chain(self, oid, container, object_name):
         self.chain.add(oid, object_name, container)
+
+
+      def get_prefetched(self, oid, name):
+        global multiplier
+        if oid in prefetched_objects:
+            data, resp_headers, ts = prefetched_objects[oid]
+            multiplier = multiplier + 0.05
+            if multiplier > 1:
+                multiplier = 1
+            if DELETE_WHEN_SERVED:
+                del prefetched_objects[oid]
+                print 'Object '+name+' served and deleted'
+            return (data, resp_headers)
+        return (False, False)
+
+
+        def prefetch_objects(self, oid, req_resp):
+            objs = self.chain.get_probabilities(oid)
+            for oid, o in objs:
+                print o.object_to_string()
+            token = req_resp.environ['HTTP_X_AUTH_TOKEN']
+            acc = 'AUTH_' + req_resp.environ['HTTP_X_TENANT_ID']
+            user_agent =  req_resp.environ['HTTP_USER_AGENT']
+            path = req_resp.environ['PATH_INFO']
+            server_add = req_resp.environ['REMOTE_ADDR']
+            server_port = req_resp.environ['SERVER_PORT']
+            
+            for oid, obj in objs:
+                if oid not in prefetched_objects:
+                    self.pool.spawn(Downloader(5))
+                    #self.pool.apply_async(download, args=(oid, acc, obj.container, obj.name, user_agent, token, obj.time_stamp.total_seconds()*multiplier, ), callback=log_result)
 
 
 def filter_factory(global_config, **local_config):
