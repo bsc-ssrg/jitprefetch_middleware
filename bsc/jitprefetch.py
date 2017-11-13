@@ -64,7 +64,7 @@ class JITPrefetchMiddleware(object):
             if request.method == 'GET':
                 oid = (hashlib.md5(request.path_info).hexdigest())
                 self.add_object_to_chain(oid, container, objname)
-                self.pool.spawn(DummyTask().run)
+                self.pool.spawn(DummyTask(20).run)
 
 
 

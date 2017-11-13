@@ -8,12 +8,16 @@ class Singleton(type):
         if cls not in cls._instances:
             cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
         return cls._instances[cls]
+        
 
 class DummyTask(object):
 
+    def __init__(self, sec):
+        self.sec = sec
+
     def run(self):
         print "Sleeping..."
-        time.sleep(10)
+        time.sleep(self.sec)
         print "Wake up!"
 
 
