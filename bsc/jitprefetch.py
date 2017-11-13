@@ -6,8 +6,6 @@ import urllib2
 import StringIO
 import itertools
 import threading
-import multiprocessing
-import cPickle as pickle
 import multiprocessing.pool
 from itertools import chain
 from swift.common import wsgi
@@ -54,7 +52,7 @@ class JITPrefetchMiddleware(object):
         self.nthreads = int(kwargs.get('nthreads', '5')) #number of threads in the download threadpool
         
         self.chain = Chain(self.chainsave, self.totalseconds, self.th)
-        self.pool = NoDaemonPool(processes=self.nthreads)
+        #self.pool = NoDaemonPool(processes=self.nthreads)
 
     @wsgify
     def __call__(self, request):

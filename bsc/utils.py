@@ -1,3 +1,4 @@
+import cPickle as pickle
 from datetime import datetime as dt
 
 class Singleton(type):
@@ -7,16 +8,6 @@ class Singleton(type):
             cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
         return cls._instances[cls]
 
-class NoDaemonProcess(multiprocessing.Process):
-    # make 'daemon' attribute always return False
-    def _get_daemon(self):
-        return False
-    def _set_daemon(self, value):
-        pass
-    daemon = property(_get_daemon, _set_daemon)
-
-class NoDaemonPool(multiprocessing.pool.Pool):
-    Process = NoDaemonProcess
 
 class ChainObject():
 
