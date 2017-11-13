@@ -76,7 +76,7 @@ class JITPrefetchMiddleware(object):
         self.chain.add(oid, object_name, container)
 
 
-      def get_prefetched(self, oid, name):
+    def get_prefetched(self, oid, name):
         global multiplier
         if oid in prefetched_objects:
             data, resp_headers, ts = prefetched_objects[oid]
@@ -90,21 +90,21 @@ class JITPrefetchMiddleware(object):
         return (False, False)
 
 
-        def prefetch_objects(self, oid, req_resp):
-            objs = self.chain.get_probabilities(oid)
-            for oid, o in objs:
-                print o.object_to_string()
-            token = req_resp.environ['HTTP_X_AUTH_TOKEN']
-            acc = 'AUTH_' + req_resp.environ['HTTP_X_TENANT_ID']
-            user_agent =  req_resp.environ['HTTP_USER_AGENT']
-            path = req_resp.environ['PATH_INFO']
-            server_add = req_resp.environ['REMOTE_ADDR']
-            server_port = req_resp.environ['SERVER_PORT']
-            
-            for oid, obj in objs:
-                if oid not in prefetched_objects:
-                    self.pool.spawn(Downloader(5))
-                    #self.pool.apply_async(download, args=(oid, acc, obj.container, obj.name, user_agent, token, obj.time_stamp.total_seconds()*multiplier, ), callback=log_result)
+    def prefetch_objects(self, oid, req_resp):
+        objs = self.chain.get_probabilities(oid)
+        for oid, o in objs:
+            print o.object_to_string()
+        token = req_resp.environ['HTTP_X_AUTH_TOKEN']
+        acc = 'AUTH_' + req_resp.environ['HTTP_X_TENANT_ID']
+        user_agent =  req_resp.environ['HTTP_USER_AGENT']
+        path = req_resp.environ['PATH_INFO']
+        server_add = req_resp.environ['REMOTE_ADDR']
+        server_port = req_resp.environ['SERVER_PORT']
+        
+        for oid, obj in objs:
+            if oid not in prefetched_objects:
+                self.pool.spawn(Downloader(5))
+                #self.pool.apply_async(download, args=(oid, acc, obj.container, obj.name, user_agent, token, obj.time_stamp.total_seconds()*multiplier, ), callback=log_result)
 
 
 def filter_factory(global_config, **local_config):
