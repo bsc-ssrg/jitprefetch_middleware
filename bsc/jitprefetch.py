@@ -13,9 +13,10 @@ from swift.common.swob import Response
 from sys import argv, getsizeof, stderr
 from swift.common.utils import split_path
 from collections import deque, OrderedDict
-from utils import Singleton, Chain, Downloader
-from swift.common.utils import GreenAsyncPile
+from utils import Singleton, Chain, total_size
+from datetime import datetime as dt
 from swift.common.internal_client import InternalClient
+from swift.common.utils import GreenAsyncPile
 from swiftclient.service import SwiftService, SwiftError
 
 
@@ -103,8 +104,7 @@ class JITPrefetchMiddleware(object):
         
         for oid, obj in objs:
             if oid not in prefetched_objects:
-                self.pool.spawn(Downloader(5))
-                #self.pool.apply_async(download, args=(oid, acc, obj.container, obj.name, user_agent, token, obj.time_stamp.total_seconds()*multiplier, ), callback=log_result)
+                self.pool.spawn(Downloader(oid, acc, obj.container, obj.name, user_agent, token, obj.time_stamp.total_seconds()*multiplier).run)
 
 
 def filter_factory(global_config, **local_config):
@@ -116,3 +116,39 @@ def filter_factory(global_config, **local_config):
         return JITPrefetchMiddleware(app, probthreshold=probthreshold, totalseconds=totalseconds,
             chainsave=chainsave, nthreads=nthreads)
     return factory
+
+
+class Downloader(object):
+
+    def __init__(self, oid, acc, container, objname, user_agent, token, delay=0, request_tries=5):
+        self.oid = oid
+        self.acc = acc
+        self.container = container
+        self.objname = objname
+        self.user_agent = user_agent
+        self.token = token
+        self.delay = delay
+        self.request_tries = request_tries
+
+    def run(self):
+        print 'Prefetching object with InternalClient: ' + self.oid + ' after ' + str(self.delay) + ' seconds of delay.'
+        time.sleep(self.delay)
+        start_time = dt.now()
+        swift = InternalClient(PROXY_PATH, self.user_agent, request_tries=self.request_tries)
+        headers = {}
+        headers['X-Auth-Token'] = self.token
+        headers['X-No-Prefetch'] = 'True'
+        status, head, it = swift.get_object(self.acc, self.container, self.objname, headers, acc_status)
+        data = [el for el in it]
+        end_time = dt.now()
+        diff = end_time - start_time
+        self.log_results(self.oid, data, head, end_time, diff)
+
+
+    def log_result(oid, data, headers, ts, diff):
+        if data:
+            while total_size(prefetched_objects) > MAX_PREFETCHED_SIZE:
+                print "MAX PREFETCHED SIZE: Deleting objects..."
+                prefetched_objects.popitem(last=True)
+            prefetched_objects[oid] = (data, headers, ts)
+            print "Object " + oid + " downloaded in " + str(diff.total_seconds()) + " seconds."

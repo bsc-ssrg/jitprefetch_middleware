@@ -2,26 +2,13 @@ import cPickle as pickle
 import time
 from datetime import datetime as dt
 
+
 class Singleton(type):
     _instances = {}
     def __call__(cls, *args, **kwargs):  # @NoSelf
         if cls not in cls._instances:
             cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
         return cls._instances[cls]
-
-
-class Downloader(object):
-
-    def __init__(self, sec):
-        self.sec = sec
-
-    def run(self):
-        print "Sleeping..."
-        time.sleep(self.sec)
-        print "Wake up!"
-
-
-
 
 
 class ChainObject():
@@ -155,3 +142,32 @@ class Chain():
         total_hits = sum(o.hits for o in chain)
         return {o.id(): ProbObject(o.object_container, o.object_name, o.hits/float(total_hits), o.time_stamp) for o in chain}
  
+
+def total_size(o, handlers={}):
+    """ Returns the approximate memory footprint an object and all of its contents.
+    """
+    dict_handler = lambda d: chain.from_iterable(d.items())
+    all_handlers = {tuple: iter,
+                    list: iter,
+                    deque: iter,
+                    dict: dict_handler,
+                    set: iter,
+                    frozenset: iter,
+                   }
+    all_handlers.update(handlers)     # user handlers take precedence
+    seen = set()                      # track which object id's have already been seen
+    default_size = getsizeof(0)       # estimate sizeof object without __sizeof__
+
+    def sizeof(o):
+        if id(o) in seen:       # do not double count the same object
+            return 0
+        seen.add(id(o))
+        s = getsizeof(o, default_size)
+       
+        for typ, handler in all_handlers.items():
+            if isinstance(o, typ):
+                s += sum(map(sizeof, handler(o)))
+                break
+        return s
+
+    return sizeof(o)
