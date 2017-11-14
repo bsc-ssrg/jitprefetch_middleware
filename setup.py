@@ -1,12 +1,14 @@
 from setuptools import setup, find_packages
+from jitprefetch import name, version
 
-setup(name='bsc',
-	version = '0.1.0',
+setup(name=name,
+	version = version,
     packages=find_packages(),
     description='Jit Prefetching filter middleware for OpenStack Swift',
+    keywords="openstack swift middleware prefetch",
+    url="https://github.com/marsqui/jitprefetch_middleware",
     author='BSC: Marc Siquier, Ramon Nou',
-    zip_safe=False,
     entry_points={
-       'paste.filter_factory': ['jitprefetch = bsc.jitprefetch:filter_factory'],
+       'paste.filter_factory': ['jitprefetch = jitprefetch.middleware:filter_factory'],
     },
 )

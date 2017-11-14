@@ -7,6 +7,7 @@ import StringIO
 import itertools
 import threading
 import eventlet
+from jitprefetch import name
 from itertools import chain
 from swift.common.swob import Response, Request
 from sys import argv, getsizeof, stderr
@@ -14,6 +15,7 @@ from swift.common.utils import split_path
 from collections import deque, OrderedDict
 from datetime import datetime as dt
 from swift.common.internal_client import InternalClient
+from swift.common.utils import register_swift_info, get_logger
 from swift.common.utils import GreenAsyncPile
 from swiftclient.service import SwiftService, SwiftError
 
@@ -50,6 +52,7 @@ class JITPrefetchMiddleware(object):
     def __init__(self, app, conf, jit_conf):
         self.app = app
         self.conf = jit_conf
+        self.logger = get_logger(self.conf, log_route=name)
         
         self.chain = Chain(self.conf['chainsave'], self.conf['totalseconds'], self.conf['probthreshold'])
         self.pool = GreenAsyncPile(self.conf['nthreads'])
@@ -73,7 +76,7 @@ class JITPrefetchMiddleware(object):
                         request.response_headers = rheaders
                         request.response_headers['X-object-prefetched'] = 'True'
                         resp.body = data
-                        
+
         return resp(env, start_response)
 
     def add_object_to_chain(self, oid, container, object_name):
@@ -121,6 +124,8 @@ def filter_factory(global_config, **local_config):
     jit_conf['chainsave'] = conf.get('chainsave', '/tmp/chain.p') #where to save the chain
     jit_conf['probthreshold'] = float(conf.get('probthreshold', '0.5')) #minimum probability to be prefetched
     jit_conf['nthreads'] = int(conf.get('nthreads', 5)) #number of threads in the download threadpool
+
+    register_swift_info(name)
 
     def factory(app):
         return JITPrefetchMiddleware(app, conf, jit_conf)
@@ -323,111 +328,3 @@ def total_size(o, handlers={}):
         return s
 
     return sizeof(o)
-
-
-class FilterIter(object):
-    def __init__(self, obj_data, timeout):
-        self.closed = False
-        self.obj_data = obj_data
-        self.timeout = timeout
-        self.buf = b''
-
-
-
-    def __iter__(self):
-        return self
-
-    def read_with_timeout(self, size):
-        try:
-            with Timeout(self.timeout):
-                if hasattr(self.obj_data, 'read'):
-                    chunk = self.obj_data.read(size)
-                else:
-                    chunk = self.obj_data.next()
-
-        except Timeout:
-            self.close()
-            raise
-        except Exception:
-            self.close()
-            raise
-
-        return chunk
-
-    def next(self, size=64 * 1024):
-        if len(self.buf) < size:
-            self.buf += self.read_with_timeout(size - len(self.buf))
-            if self.buf == b'':
-                self.close()
-                raise StopIteration('Stopped iterator ex')
-
-        if len(self.buf) > size:
-            data = self.buf[:size]
-            self.buf = self.buf[size:]
-        else:
-            data = self.buf
-            self.buf = b''
-        return data
-
-    def _close_check(self):
-        if self.closed:
-            raise ValueError('I/O operation on closed file')
-
-    def read(self, size=64 * 1024):
-        self._close_check()
-        return self.next(size)
-
-    def readline(self, size=-1):
-        self._close_check()
-
-        # read data into self.buf if there is not enough data
-        while b'\n' not in self.buf and \
-              (size < 0 or len(self.buf) < size):
-            if size < 0:
-                chunk = self.read()
-            else:
-                chunk = self.read(size - len(self.buf))
-            if not chunk:
-                break
-            self.buf += chunk
-
-        # Retrieve one line from buf
-        data, sep, rest = self.buf.partition(b'\n')
-        data += sep
-        self.buf = rest
-
-        # cut out size from retrieved line
-        if size >= 0 and len(data) > size:
-            self.buf = data[size:] + self.buf
-            data = data[:size]
-
-        return data
-
-    def readlines(self, sizehint=-1):
-        self._close_check()
-        lines = []
-        try:
-            while True:
-                line = self.readline(sizehint)
-                if not line:
-                    break
-                lines.append(line)
-                if sizehint >= 0:
-                    sizehint -= len(line)
-                    if sizehint <= 0:
-                        break
-        except StopIteration:
-            pass
-        return lines
-
-    def close(self):
-        if self.closed:
-            return
-        try:
-            self.obj_data.close()
-        except AttributeError:
-            pass
-        self.closed = True
-
-    def __del__(self):
-        self.close()
