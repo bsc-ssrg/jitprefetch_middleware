@@ -8,9 +8,7 @@ import itertools
 import threading
 import eventlet
 from itertools import chain
-from swift.common import wsgi
-from swift.common.swob import wsgify
-from swift.common.swob import Response
+from swift.common.swob import Response, Request
 from sys import argv, getsizeof, stderr
 from swift.common.utils import split_path
 from collections import deque, OrderedDict
@@ -56,8 +54,9 @@ class JITPrefetchMiddleware(object):
         self.chain = Chain(self.conf['chainsave'], self.conf['totalseconds'], self.conf['probthreshold'])
         self.pool = GreenAsyncPile(self.conf['nthreads'])
 
-    @wsgify
-    def __call__(self, request):
+
+    def __call__(self, env, start_response):
+        request = Request(env)
         resp = request.get_response(self.app)
         try:
             (version, account, container, objname) = split_path(request.path_info, 4, 4, True)
@@ -74,8 +73,8 @@ class JITPrefetchMiddleware(object):
                         request.response_headers = rheaders
                         request.response_headers['X-object-prefetched'] = 'True'
                         resp.body = data
-                        return resp(request.environ)
-        return self.app
+                        
+        return resp(env, start_response)
 
     def add_object_to_chain(self, oid, container, object_name):
         self.chain.add(oid, object_name, container)
