@@ -37,6 +37,14 @@ prefetched_objects = OrderedDict()
 
 
 
+class Singleton(type):
+    _instances = {}
+    def __call__(cls, *args, **kwargs):  # @NoSelf
+        if cls not in cls._instances:
+            cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
+        return cls._instances[cls]
+
+
 class JITPrefetchMiddleware(object):
 
     __metaclass__ = Singleton
@@ -153,15 +161,6 @@ class Downloader(object):
                 prefetched_objects.popitem(last=True)
             prefetched_objects[oid] = (data, headers, ts)
             print "Object " + oid + " downloaded in " + str(diff.total_seconds()) + " seconds."
-
-
-
-class Singleton(type):
-    _instances = {}
-    def __call__(cls, *args, **kwargs):  # @NoSelf
-        if cls not in cls._instances:
-            cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
-        return cls._instances[cls]
 
 
 class ChainObject():
