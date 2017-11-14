@@ -6,6 +6,7 @@ import urllib2
 import StringIO
 import itertools
 import threading
+import eventlet
 from itertools import chain
 from swift.common import wsgi
 from swift.common.swob import wsgify
@@ -20,14 +21,10 @@ from swiftclient.service import SwiftService, SwiftError
 
 
 ################### CONFIGURATION ###################
-TOTALSECONDS = 60 #allowed time diff in seconds between previous and next object
-PROB_THRESHOLD = 0.5 #minimum probability to be prefetched
-N_THREADS = 5 #number of threads in the download threadpool
 AUTOSAVE = 30 #autosave chain each X seconds
 MAX_PREFETCHED_SIZE =  1073741824 #1Gb of prefetched objects
 PREFETCH = True #Enables prefetching objects. If False it just updates the chain
 DELETE_WHEN_SERVED = True #True if objects are deleted from memory after being served
-CHAINSAVE = '/tmp/chain.p' #where to save the chain
 WAIT_TIME_MULTIPLIER = 0.5 #wait time for download multiplier
 PROXY_PATH = '/etc/swift/proxy-server.conf' #proxy configuration file
 MAX_TIME_IN_MEMORY = 30 #max seconds for an object to be in memory without being downloaded
@@ -44,15 +41,12 @@ class JITPrefetchMiddleware(object):
 
     __metaclass__ = Singleton
 
-    def __init__(self, app, *args, **kwargs):
+    def __init__(self, app, conf, jit_conf):
         self.app = app
-        self.th = float(kwargs.get('probthreshold', '0.5')) #minimum probability to be prefetched
-        self.totalseconds = float(kwargs.get('totalseconds', '60')) #allowed time diff in seconds between previous and next object
-        self.chainsave = kwargs.get('chainsave', '/tmp/chain.p') #where to save the chain
-        self.nthreads = int(kwargs.get('nthreads', '5')) #number of threads in the download threadpool
+        self.conf = jit_conf
         
-        self.chain = Chain(self.chainsave, self.totalseconds, self.th)
-        self.pool = GreenAsyncPile(self.nthreads)
+        self.chain = Chain(self.conf['chainsave'], self.conf['totalseconds'], self.conf['probthreshold'])
+        self.pool = GreenAsyncPile(self.conf['nthreads'])
 
     @wsgify
     def __call__(self, request):
@@ -70,8 +64,7 @@ class JITPrefetchMiddleware(object):
                     if data:
                         request.response_headers = rheaders
                         request.response_headers['X-object-prefetched'] = 'True'
-                        return iter(data)
-
+                        return FilterIter(data, 10)
 
         return self.app
 
@@ -110,13 +103,19 @@ class JITPrefetchMiddleware(object):
 
 
 def filter_factory(global_config, **local_config):
-    totalseconds = local_config.get('totalseconds') #allowed time diff in seconds between previous and next object
-    chainsave = local_config.get('chainsave') #where to save the chain
-    probthreshold = local_config.get('probthreshold') #minimum probability to be prefetched
-    nthreads = local_config.get('nthreads') #number of threads in the download threadpool
+
+    conf = global_config.copy()
+    conf.update(local_config)
+
+    jit_conf = dict()
+
+    jit_conf['totalseconds'] = int(conf.get('totalseconds', 60)) #allowed time diff in seconds between previous and next object
+    jit_conf['chainsave'] = conf.get('chainsave', '/tmp/chain.p') #where to save the chain
+    jit_conf['probthreshold'] = float(conf.get('probthreshold', '0.5')) #minimum probability to be prefetched
+    jit_conf['nthreads'] = int(conf.get('nthreads', 5)) #number of threads in the download threadpool
+
     def factory(app):
-        return JITPrefetchMiddleware(app, probthreshold=probthreshold, totalseconds=totalseconds,
-            chainsave=chainsave, nthreads=nthreads)
+        return JITPrefetchMiddleware(app, conf, jit_conf)
     return factory
 
 
@@ -134,7 +133,7 @@ class Downloader(object):
 
     def run(self):
         print 'Prefetching object with InternalClient: ' + self.oid + ' after ' + str(self.delay) + ' seconds of delay.'
-        time.sleep(self.delay)
+        eventlet.sleep(self.delay)
         start_time = dt.now()
         swift = InternalClient(PROXY_PATH, self.user_agent, request_tries=self.request_tries)
         headers = {}
@@ -325,3 +324,111 @@ def total_size(o, handlers={}):
         return s
 
     return sizeof(o)
+
+
+class FilterIter(object):
+    def __init__(self, obj_data, timeout):
+        self.closed = False
+        self.obj_data = obj_data
+        self.timeout = timeout
+        self.buf = b''
+
+
+
+    def __iter__(self):
+        return self
+
+    def read_with_timeout(self, size):
+        try:
+            with Timeout(self.timeout):
+                if hasattr(self.obj_data, 'read'):
+                    chunk = self.obj_data.read(size)
+                else:
+                    chunk = self.obj_data.next()
+
+        except Timeout:
+            self.close()
+            raise
+        except Exception:
+            self.close()
+            raise
+
+        return chunk
+
+    def next(self, size=64 * 1024):
+        if len(self.buf) < size:
+            self.buf += self.read_with_timeout(size - len(self.buf))
+            if self.buf == b'':
+                self.close()
+                raise StopIteration('Stopped iterator ex')
+
+        if len(self.buf) > size:
+            data = self.buf[:size]
+            self.buf = self.buf[size:]
+        else:
+            data = self.buf
+            self.buf = b''
+        return data
+
+    def _close_check(self):
+        if self.closed:
+            raise ValueError('I/O operation on closed file')
+
+    def read(self, size=64 * 1024):
+        self._close_check()
+        return self.next(size)
+
+    def readline(self, size=-1):
+        self._close_check()
+
+        # read data into self.buf if there is not enough data
+        while b'\n' not in self.buf and \
+              (size < 0 or len(self.buf) < size):
+            if size < 0:
+                chunk = self.read()
+            else:
+                chunk = self.read(size - len(self.buf))
+            if not chunk:
+                break
+            self.buf += chunk
+
+        # Retrieve one line from buf
+        data, sep, rest = self.buf.partition(b'\n')
+        data += sep
+        self.buf = rest
+
+        # cut out size from retrieved line
+        if size >= 0 and len(data) > size:
+            self.buf = data[size:] + self.buf
+            data = data[:size]
+
+        return data
+
+    def readlines(self, sizehint=-1):
+        self._close_check()
+        lines = []
+        try:
+            while True:
+                line = self.readline(sizehint)
+                if not line:
+                    break
+                lines.append(line)
+                if sizehint >= 0:
+                    sizehint -= len(line)
+                    if sizehint <= 0:
+                        break
+        except StopIteration:
+            pass
+        return lines
+
+    def close(self):
+        if self.closed:
+            return
+        try:
+            self.obj_data.close()
+        except AttributeError:
+            pass
+        self.closed = True
+
+    def __del__(self):
+        self.close()
