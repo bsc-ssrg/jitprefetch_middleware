@@ -172,7 +172,7 @@ class ChainObject():
         self.set_ts(ts)
 
     def object_to_string(self):
-        return "ID:" + self.object_id + " HITS:" + str(self.hits) + " TS:" + str(self.time_stamp.total_seconds()) + " DT: " + str(self.down_time.total_seconds())
+        return "ID:" + self.object_id + " HITS:" + str(self.hits) + " TS:" + str(self.time_stamp.total_seconds()) + " DT: " + str(self.down_time)
 
     def get_object_name(self):
         return self.object_container + " " + self.object_name
@@ -188,7 +188,7 @@ class ChainObject():
 
     def set_down_time(self, dt):
         if dt.total_seconds() > self.down_time:
-            self.down_time = dt
+            self.down_time = dt.total_seconds()
 
     def id(self):
         return self.object_id
@@ -199,6 +199,11 @@ class ProbObject():
         self.name = name
         self.probability = prob
         self.time_stamp = ts
+        self.check_time_stamp()
+
+    def check_time_stamp():
+        if self.time_stamp < 0:
+            self.time_stamp = 0
 
     def object_to_string(self):
         return "CONTAINER: " + self.container + " NAME: " + self.name + " P: " + str(self.probability) 
@@ -304,7 +309,7 @@ class Chain():
 
     def _probabilities(self, chain):
         total_hits = sum(o.hits for o in chain)
-        return {o.id(): ProbObject(o.object_container, o.object_name, o.hits/float(total_hits), o.time_stamp.total_seconds()-o.down_time.total_seconds()) for o in chain}
+        return {o.id(): ProbObject(o.object_container, o.object_name, o.hits/float(total_hits), (o.time_stamp.total_seconds()-o.down_time)) for o in chain}
  
 
 def total_size(o, handlers={}):
