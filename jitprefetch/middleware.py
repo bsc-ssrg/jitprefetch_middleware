@@ -1,23 +1,18 @@
-import os
-import sys
-import time
 import hashlib
-import urllib2
-import StringIO
-import itertools
-import threading
 import eventlet
-from jitprefetch import name
+import threading
+import cPickle as pickle
+from sys import getsizeof
 from itertools import chain
-from swift.common.swob import Response, Request
-from sys import argv, getsizeof, stderr
+from jitprefetch import name
+from datetime import datetime as dt
+from swift.common.swob import Request
 from swift.common.utils import split_path
 from collections import deque, OrderedDict
-from datetime import datetime as dt
+from swift.common.utils import GreenAsyncPile
 from swift.common.internal_client import InternalClient
 from swift.common.utils import register_swift_info, get_logger
-from swift.common.utils import GreenAsyncPile
-from swiftclient.service import SwiftService, SwiftError
+
 
 
 ################### CONFIGURATION ###################
@@ -54,7 +49,7 @@ class JITPrefetchMiddleware(object):
         self.conf = jit_conf
         self.logger = get_logger(self.conf, log_route=name)
         
-        self.chain = Chain(self.conf['chainsave'], self.conf['totalseconds'], self.conf['probthreshold'])
+        self.chain = Chain(self.logger, self.conf['chainsave'], self.conf['totalseconds'], self.conf['probthreshold'])
         self.pool = GreenAsyncPile(self.conf['nthreads'])
 
 
@@ -92,7 +87,7 @@ class JITPrefetchMiddleware(object):
                 multiplier = 1
             if DELETE_WHEN_SERVED:
                 del prefetched_objects[oid]
-                print 'Object '+name+' served and deleted'
+                self.logger.debug('Object '+name+' served and deleted')
             return (data, resp_headers)
         return (False, False)
 
@@ -100,17 +95,14 @@ class JITPrefetchMiddleware(object):
     def prefetch_objects(self, oid, req_resp):
         objs = self.chain.get_probabilities(oid)
         for oid, o in objs:
-            print o.object_to_string()
+            self.logger.debug(o.object_to_string())
         token = req_resp.environ['HTTP_X_AUTH_TOKEN']
         acc = 'AUTH_' + req_resp.environ['HTTP_X_TENANT_ID']
         user_agent =  req_resp.environ['HTTP_USER_AGENT']
-        path = req_resp.environ['PATH_INFO']
-        server_add = req_resp.environ['REMOTE_ADDR']
-        server_port = req_resp.environ['SERVER_PORT']
         
         for oid, obj in objs:
             if oid not in prefetched_objects:
-                self.pool.spawn(Downloader(oid, acc, obj.container, obj.name, user_agent, token, obj.time_stamp.total_seconds()*multiplier).run)
+                self.pool.spawn(Downloader(self.logger, oid, acc, obj.container, obj.name, user_agent, token, obj.time_stamp.total_seconds()*multiplier).run)
 
 
 def filter_factory(global_config, **local_config):
@@ -134,7 +126,8 @@ def filter_factory(global_config, **local_config):
 
 class Downloader(object):
 
-    def __init__(self, oid, acc, container, objname, user_agent, token, delay=0, request_tries=5):
+    def __init__(self, logger, oid, acc, container, objname, user_agent, token, delay=0, request_tries=5):
+        self.logger = logger
         self.oid = oid
         self.acc = acc
         self.container = container
@@ -145,7 +138,7 @@ class Downloader(object):
         self.request_tries = request_tries
 
     def run(self):
-        print 'Prefetching object with InternalClient: ' + self.oid + ' after ' + str(self.delay) + ' seconds of delay.'
+        self.logger('Prefetching object with InternalClient: ' + self.oid + ' after ' + str(self.delay) + ' seconds of delay.')
         eventlet.sleep(self.delay)
         start_time = dt.now()
         swift = InternalClient(PROXY_PATH, self.user_agent, request_tries=self.request_tries)
@@ -209,7 +202,8 @@ class ProbObject():
 
 class Chain():
 
-    def __init__(self, chainsave='/tmp/chain.p', maxseconds=60, prth=0.5): 
+    def __init__(self, logger, chainsave='/tmp/chain.p', maxseconds=60, prth=0.5): 
+        self.logger = logger
         self._chain = {}
         self._chainsave = chainsave
         self._maxseconds = maxseconds
@@ -273,12 +267,12 @@ class Chain():
     def chain_stats(self):
         self.chain_length()
         for o in self._chain:
-            print "\tOBJECT: " + o
+            self.logger.debug("\tOBJECT: " + o)
             for och in self._chain[o]:
-                print "\t\tnext: " + och.object_to_string()
+                self.logger.debug("\t\tnext: " + och.object_to_string())
 
     def chain_length(self):
-        print "Chain length: " + str(len(self._chain))
+        self.logger.debug("Chain length: " + str(len(self._chain)))
 
     def get_probabilities(self, oid):
         probs1 = self._probabilities(self._get_object_chain(oid))
