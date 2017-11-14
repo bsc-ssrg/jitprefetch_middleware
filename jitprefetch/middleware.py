@@ -66,7 +66,7 @@ class JITPrefetchMiddleware(object):
                 self.add_object_to_chain(oid, container, objname)
                 if PREFETCH:
                     data, rheaders = self.get_prefetched(oid, objname)
-                    self.prefetch_objects(oid, request)
+                    self.prefetch_objects(oid, account, request)
                     if data:
                         request.response_headers = rheaders
                         request.response_headers['X-object-prefetched'] = 'True'
@@ -92,17 +92,16 @@ class JITPrefetchMiddleware(object):
         return (False, False)
 
 
-    def prefetch_objects(self, oid, req_resp):
+    def prefetch_objects(self, oid, account, req_resp):
         objs = self.chain.get_probabilities(oid)
         for oid, o in objs:
             self.logger.debug(o.object_to_string())
         token = req_resp.environ['HTTP_X_AUTH_TOKEN']
-        acc = 'AUTH_' + req_resp.environ['HTTP_X_TENANT_ID']
         user_agent =  req_resp.environ['HTTP_USER_AGENT']
         
         for oid, obj in objs:
             if oid not in prefetched_objects:
-                self.pool.spawn(Downloader(self.logger, oid, acc, obj.container, obj.name, user_agent, token, obj.time_stamp.total_seconds()*multiplier).run)
+                self.pool.spawn(Downloader(self.logger, oid, account, obj.container, obj.name, user_agent, token, obj.time_stamp.total_seconds()*multiplier).run)
 
 
 def filter_factory(global_config, **local_config):
@@ -138,7 +137,7 @@ class Downloader(object):
         self.request_tries = request_tries
 
     def run(self):
-        self.logger('Prefetching object with InternalClient: ' + self.oid + ' after ' + str(self.delay) + ' seconds of delay.')
+        self.logger.debug('Prefetching object with InternalClient: ' + self.oid + ' after ' + str(self.delay) + ' seconds of delay.')
         eventlet.sleep(self.delay)
         start_time = dt.now()
         swift = InternalClient(PROXY_PATH, self.user_agent, request_tries=self.request_tries)
@@ -155,10 +154,10 @@ class Downloader(object):
     def log_results(self, oid, data, headers, ts, diff):
         if data:
             while total_size(prefetched_objects) > MAX_PREFETCHED_SIZE:
-                print "MAX PREFETCHED SIZE: Deleting objects..."
+                self.logger.debug("MAX PREFETCHED SIZE: Deleting objects...")
                 prefetched_objects.popitem(last=True)
             prefetched_objects[oid] = (data, headers, ts)
-            print "Object " + oid + " downloaded in " + str(diff.total_seconds()) + " seconds."
+            self.logger.debug("Object " + oid + " downloaded in " + str(diff.total_seconds()) + " seconds.")
 
 
 class ChainObject():
