@@ -58,6 +58,7 @@ class JITPrefetchMiddleware(object):
 
     @wsgify
     def __call__(self, request):
+        resp = request.get_response(self.app)
         try:
             (version, account, container, objname) = split_path(request.path_info, 4, 4, True)
         except ValueError:
@@ -72,8 +73,8 @@ class JITPrefetchMiddleware(object):
                     if data:
                         request.response_headers = rheaders
                         request.response_headers['X-object-prefetched'] = 'True'
-                        return FilterIter(data, 10)
-
+                        resp.body = data
+                        return resp(request.environ)
         return self.app
 
     def add_object_to_chain(self, oid, container, object_name):
