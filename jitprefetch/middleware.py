@@ -65,14 +65,13 @@ class JITPrefetchMiddleware(object):
                 oid = (hashlib.md5(request.path_info).hexdigest())
                 self.add_object_to_chain(oid, container, objname)
                 if PREFETCH:
-                    data, rheaders = self.get_prefetched(oid, objname)
+                    data = self.get_prefetched(oid, objname)
                     self.prefetch_objects(oid, account, request)
                     if data:
-                        request.response_headers = rheaders
-                        request.response_headers['X-object-prefetched'] = 'True'
+                        resp.headers['X-object-prefetched'] = 'True'
                         resp.body = data
 
-        return resp(env, start_response)
+        return resp(env, start_response)    
 
     def add_object_to_chain(self, oid, container, object_name):
         self.chain.add(oid, object_name, container)
@@ -81,15 +80,16 @@ class JITPrefetchMiddleware(object):
     def get_prefetched(self, oid, name):
         global multiplier
         if oid in prefetched_objects:
-            data, resp_headers, ts = prefetched_objects[oid]
+            data, ts = prefetched_objects[oid]
             multiplier = multiplier + 0.05
+            self.chain.add_down_time(oid, ts)
             if multiplier > 1:
                 multiplier = 1
             if DELETE_WHEN_SERVED:
                 del prefetched_objects[oid]
                 self.logger.debug('Object '+name+' served and deleted')
-            return (data, resp_headers)
-        return (False, False)
+            return data
+        return False
 
 
     def prefetch_objects(self, oid, account, req_resp):
@@ -101,7 +101,7 @@ class JITPrefetchMiddleware(object):
         
         for oid, obj in objs:
             if oid not in prefetched_objects:
-                self.pool.spawn(Downloader(self.logger, oid, account, obj.container, obj.name, user_agent, token, obj.time_stamp.total_seconds()*multiplier).run)
+                self.pool.spawn(Downloader(self.logger, oid, account, obj.container, obj.name, user_agent, token, obj.time_stamp*multiplier).run)
 
 
 def filter_factory(global_config, **local_config):
@@ -148,15 +148,15 @@ class Downloader(object):
         data = [el for el in it]
         end_time = dt.now()
         diff = end_time - start_time
-        self.log_results(self.oid, data, head, end_time, diff)
+        self.log_results(self.oid, data, diff)
 
 
-    def log_results(self, oid, data, headers, ts, diff):
+    def log_results(self, oid, data, diff):
         if data:
             while total_size(prefetched_objects) > MAX_PREFETCHED_SIZE:
                 self.logger.debug("MAX PREFETCHED SIZE: Deleting objects...")
                 prefetched_objects.popitem(last=True)
-            prefetched_objects[oid] = (data, headers, ts)
+            prefetched_objects[oid] = (data, diff)
             self.logger.debug("Object " + oid + " downloaded in " + str(diff.total_seconds()) + " seconds.")
 
 
@@ -168,10 +168,11 @@ class ChainObject():
         self.object_container = container
         self.hits = 1
         self.time_stamp = ''
+        self.down_time = 0
         self.set_ts(ts)
 
     def object_to_string(self):
-        return "ID:" + self.object_id + " HITS:" + str(self.hits) + " TS:" + str(self.time_stamp.total_seconds())
+        return "ID:" + self.object_id + " HITS:" + str(self.hits) + " TS:" + str(self.time_stamp.total_seconds()) + " DT: " + str(self.down_time.total_seconds())
 
     def get_object_name(self):
         return self.object_container + " " + self.object_name
@@ -185,6 +186,10 @@ class ChainObject():
         elif ts.total_seconds() < self.time_stamp.total_seconds():
                 self.time_stamp = ts
 
+    def set_down_time(self, dt):
+        if dt.total_seconds() > self.down_time:
+            self.down_time = dt
+
     def id(self):
         return self.object_id
 
@@ -196,7 +201,7 @@ class ProbObject():
         self.time_stamp = ts
 
     def object_to_string(self):
-        return "CONTAINER: " + self.container + " NAME: " + self.name + " P: " + str(self.probability)
+        return "CONTAINER: " + self.container + " NAME: " + self.name + " P: " + str(self.probability) 
 
 
 class Chain():
@@ -257,6 +262,15 @@ class Chain():
         self._last_oid = oid
         self._last_ts = dt.now()
 
+
+    def add_down_time(self, oid, ts):
+        for obj in self._chain:
+            objs = self._get_object_chain(obj)
+            for o in filter(lambda x: x.id()==oid, objs):
+                o.set_down_time(ts)
+            self._set_object_chain(obj, objs)
+
+
     def _check_time_diff(self):
         if self._last_ts:
             diff = dt.now() - self._last_ts
@@ -266,12 +280,12 @@ class Chain():
     def chain_stats(self):
         self.chain_length()
         for o in self._chain:
-            self.logger.debug("\tOBJECT: " + o)
+            print "\tOBJECT: " + o
             for och in self._chain[o]:
-                self.logger.debug("\t\tnext: " + och.object_to_string())
+                print "\t\tnext: " + och.object_to_string()
 
     def chain_length(self):
-        self.logger.debug("Chain length: " + str(len(self._chain)))
+        print "Chain length: " + str(len(self._chain))
 
     def get_probabilities(self, oid):
         probs1 = self._probabilities(self._get_object_chain(oid))
@@ -290,7 +304,7 @@ class Chain():
 
     def _probabilities(self, chain):
         total_hits = sum(o.hits for o in chain)
-        return {o.id(): ProbObject(o.object_container, o.object_name, o.hits/float(total_hits), o.time_stamp) for o in chain}
+        return {o.id(): ProbObject(o.object_container, o.object_name, o.hits/float(total_hits), o.time_stamp.total_seconds()-o.down_time.total_seconds()) for o in chain}
  
 
 def total_size(o, handlers={}):
