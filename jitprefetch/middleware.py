@@ -52,9 +52,6 @@ class JITPrefetchMiddleware(object):
         
         self.chain = Chain(self.logger, self.conf['chainsave'], self.conf['totalseconds'], self.conf['probthreshold'])
         self.pool = GreenAsyncPile(self.conf['nthreads'])
-        t = DeleteMemory()
-        t.daemon = True
-        t.start()
 
     def __del__(self):
         self.chain.save_chain()
@@ -110,26 +107,6 @@ class JITPrefetchMiddleware(object):
                 self.pool.spawn(Downloader(self.logger, oid, account, obj.container, obj.name, user_agent, token, obj.time_stamp*multiplier).run)
 
 
-class DeleteMemory(Thread):
-
-    def __init__(self):
-        Thread.__init__(self)
-
-    def run(self):
-        global multiplier
-        print "Running thread delete..."
-        for oid in prefetched_objects:
-            data, diff, ts = prefetched_objects[oid]
-            if (dt.now()-ts).total_seconds() >= MAX_TIME_IN_MEMORY:
-                del prefetched_objects[oid] 
-                print "Object " + oid + " deleted from memory"
-                multiplier = multiplier - 0.1
-                if multiplier < 0:
-                    multiplier = 0 
-        eventlet.sleep(10)
-        self.run()
-
-
 def filter_factory(global_config, **local_config):
 
     conf = global_config.copy()
@@ -175,6 +152,7 @@ class Downloader(object):
         end_time = dt.now()
         diff = end_time - start_time
         self.log_results(self.oid, data, diff)
+        self.delete_memory()
 
 
     def log_results(self, oid, data, diff):
@@ -185,6 +163,17 @@ class Downloader(object):
             prefetched_objects[oid] = (data, diff, dt.now())
             self.logger.debug("Object " + oid + " downloaded in " + str(diff.total_seconds()) + " seconds.")
 
+
+    def delete_memory(self):
+        global multiplier
+        for oid in prefetched_objects:
+            data, diff, ts = prefetched_objects[oid]
+            if (dt.now()-ts).total_seconds() >= MAX_TIME_IN_MEMORY:
+                del prefetched_objects[oid] 
+                print "Object " + oid + " deleted from memory"
+                multiplier = multiplier - 0.1
+                if multiplier < 0:
+                    multiplier = 0 
 
 class ChainObject():
 
