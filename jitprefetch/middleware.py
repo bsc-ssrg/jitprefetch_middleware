@@ -52,10 +52,9 @@ class JITPrefetchMiddleware(object):
         
         self.chain = Chain(self.logger, self.conf['chainsave'], self.conf['totalseconds'], self.conf['probthreshold'])
         self.pool = GreenAsyncPile(self.conf['nthreads'])
-        t = SaveThread(self.chain)
-        t.daemon=True
-        t.start()
 
+    def __del__(self):
+        self.chain.save_chain()
 
     def __call__(self, env, start_response):
         request = Request(env)
@@ -106,19 +105,6 @@ class JITPrefetchMiddleware(object):
         for oid, obj in objs:
             if oid not in prefetched_objects:
                 self.pool.spawn(Downloader(self.logger, oid, account, obj.container, obj.name, user_agent, token, obj.time_stamp*multiplier).run)
-
-
-class SaveThread():
-
-    def __init__(self, chain):
-        Thread.__init__(self)
-        self.chain = chain
-
-    def run(self):
-        self.chain.save_chain()
-        eventlet.sleep(30)
-        self.run()
-
 
 def filter_factory(global_config, **local_config):
 
@@ -217,7 +203,7 @@ class ProbObject():
         self.time_stamp = ts
         self.check_time_stamp()
 
-    def check_time_stamp():
+    def check_time_stamp(self):
         if self.time_stamp < 0:
             self.time_stamp = 0
 
