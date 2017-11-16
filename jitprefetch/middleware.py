@@ -5,7 +5,7 @@ import cPickle as pickle
 from sys import getsizeof
 from itertools import chain
 from jitprefetch import name
-from threading import thread
+from threading import Thread
 from datetime import datetime as dt
 from swift.common.swob import Request
 from swift.common.utils import split_path
@@ -108,18 +108,16 @@ class JITPrefetchMiddleware(object):
                 self.pool.spawn(Downloader(self.logger, oid, account, obj.container, obj.name, user_agent, token, obj.time_stamp*multiplier).run)
 
 
-    class SaveThread():
+class SaveThread():
 
-        def __init__(self, chain):
-            Thread.__init__(self)
-            self.chain = chain
+    def __init__(self, chain):
+        Thread.__init__(self)
+        self.chain = chain
 
-        def run(self):
-            self.chain.save_chain()
-            eventlet.sleep(30)
-            self.run()
-
-
+    def run(self):
+        self.chain.save_chain()
+        eventlet.sleep(30)
+        self.run()
 
 
 def filter_factory(global_config, **local_config):
@@ -238,7 +236,7 @@ class Chain():
         self._last_oid = None
         self._last_ts = None
         self.load_chain()
-        
+
     def __del__(self):
         with open(self._chainsave, 'wb') as fp:
             pickle.dump(self._chain, fp)
