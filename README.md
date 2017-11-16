@@ -15,7 +15,8 @@ use = egg:jitprefetch#jitprefetch
 probthreshold = 0.75
 totalseconds = 65
 chainsave = /tmp/chain.p
-nthreads = 5
+nthreads = 200
 ```
+Where `probthreshold` is the minimum probability for an object to be prefetched, `totalseconds` is the maximum time difference between objects in order to be considered consecutive, `chainsave` is the location to save the chain and `nthreads` is the number of threads in the prefetch downloader pool.
 
 * Also it is necessary to add this filter to the pipeline variable in the same proxy-server.conf file. This filter must be added after `keystoneauth` filter and before `slo`, `proxy-logging` and `proxy-server` filters.
