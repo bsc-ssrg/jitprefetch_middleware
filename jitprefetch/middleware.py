@@ -5,6 +5,7 @@ import cPickle as pickle
 from sys import getsizeof
 from itertools import chain
 from jitprefetch import name
+from threading import thread
 from datetime import datetime as dt
 from swift.common.swob import Request
 from swift.common.utils import split_path
@@ -51,6 +52,9 @@ class JITPrefetchMiddleware(object):
         
         self.chain = Chain(self.logger, self.conf['chainsave'], self.conf['totalseconds'], self.conf['probthreshold'])
         self.pool = GreenAsyncPile(self.conf['nthreads'])
+        t = SaveThread(self.chain)
+        t.daemon=True
+        t.start()
 
 
     def __call__(self, env, start_response):
@@ -102,6 +106,20 @@ class JITPrefetchMiddleware(object):
         for oid, obj in objs:
             if oid not in prefetched_objects:
                 self.pool.spawn(Downloader(self.logger, oid, account, obj.container, obj.name, user_agent, token, obj.time_stamp*multiplier).run)
+
+
+    class SaveThread():
+
+        def __init__(self, chain):
+            Thread.__init__(self)
+            self.chain = chain
+
+        def run(self):
+            self.chain.save_chain()
+            eventlet.sleep(30)
+            self.run()
+
+
 
 
 def filter_factory(global_config, **local_config):
@@ -220,7 +238,7 @@ class Chain():
         self._last_oid = None
         self._last_ts = None
         self.load_chain()
-
+        
     def __del__(self):
         with open(self._chainsave, 'wb') as fp:
             pickle.dump(self._chain, fp)
@@ -238,7 +256,8 @@ class Chain():
 
     def auto_save(self, timer=30):
         self.save_chain()
-        threading.Timer(timer, self.auto_save, [timer]).start()
+        eventlet.sleep(timer)
+        self.auto_save(timer)
         
 
     def _get_object_chain(self, oid):
