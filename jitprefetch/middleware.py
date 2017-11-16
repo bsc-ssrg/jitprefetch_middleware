@@ -50,7 +50,7 @@ class JITPrefetchMiddleware(object):
         self.conf = jit_conf
         self.logger = get_logger(self.conf, log_route=name)
         
-        self.chain = Chain(self.logger, self.conf['chainsave'], self.conf['totalseconds'], self.conf['probthreshold'])
+        self.chain = Chain(self.logger, self.conf['chainsave'], self.conf['totalseconds'], self.conf['probthreshold'], self.conf['twolevels'])
         self.pool = GreenAsyncPile(self.conf['nthreads'])
 
     def __del__(self):
@@ -118,6 +118,7 @@ def filter_factory(global_config, **local_config):
     jit_conf['chainsave'] = conf.get('chainsave', '/tmp/chain.p') #where to save the chain
     jit_conf['probthreshold'] = float(conf.get('probthreshold', '0.5')) #minimum probability to be prefetched
     jit_conf['nthreads'] = int(conf.get('nthreads', 5)) #number of threads in the download threadpool
+    jit_conf['twolevels'] = bool(conf.get('twolevels', False)) #two levels true/false
 
     register_swift_info(name)
 
@@ -162,7 +163,6 @@ class Downloader(object):
                 prefetched_objects.popitem(last=True)
             prefetched_objects[oid] = (data, diff, dt.now())
             self.logger.debug("Object " + oid + " downloaded in " + str(diff.total_seconds()) + " seconds.")
-
 
     def delete_memory(self):
         global multiplier
@@ -226,12 +226,13 @@ class ProbObject():
 
 class Chain():
 
-    def __init__(self, logger, chainsave='/tmp/chain.p', maxseconds=60, prth=0.5): 
+    def __init__(self, logger, chainsave='/tmp/chain.p', maxseconds=60, prth=0.5, twolevels=False): 
         self.logger = logger
         self._chain = {}
         self._chainsave = chainsave
         self._maxseconds = maxseconds
         self._prth = prth
+        self._twolevels = twolevels
         self._last_oid = None
         self._last_ts = None
         self.load_chain()
@@ -310,16 +311,17 @@ class Chain():
 
     def get_probabilities(self, oid):
         probs1 = self._probabilities(self._get_object_chain(oid))
-        probs2 = dict()
-        for oi in probs1:
-            pr = self._probabilities(self._get_object_chain(oi))
-            pr = {k: ProbObject(v.container, v.name, v.probability*probs1[oi].probability, v.time_stamp) for k, v in pr.items()}
-            probs2.update(pr)
-        for oi in probs2:
-            if oi in probs1:
-                probs1[oi].probability += probs2[oi].probability
-            else:
-                probs1[oi] = probs2[oi]
+        if self._twolevels:
+            probs2 = dict()
+            for oi in probs1:
+                pr = self._probabilities(self._get_object_chain(oi))
+                pr = {k: ProbObject(v.container, v.name, v.probability*probs1[oi].probability, v.time_stamp) for k, v in pr.items()}
+                probs2.update(pr)
+            for oi in probs2:
+                if oi in probs1:
+                    probs1[oi].probability += probs2[oi].probability
+                else:
+                    probs1[oi] = probs2[oi]
         objs =  filter(lambda (a,b): b.probability>self._prth, probs1.iteritems())
         return sorted(objs, key=lambda (a,b): b.probability, reverse=True)
 
