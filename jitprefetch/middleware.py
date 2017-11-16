@@ -52,6 +52,9 @@ class JITPrefetchMiddleware(object):
         
         self.chain = Chain(self.logger, self.conf['chainsave'], self.conf['totalseconds'], self.conf['probthreshold'])
         self.pool = GreenAsyncPile(self.conf['nthreads'])
+        t = DeleteMemory()
+        t.daemon = True
+        t.start()
 
     def __del__(self):
         self.chain.save_chain()
@@ -105,6 +108,27 @@ class JITPrefetchMiddleware(object):
         for oid, obj in objs:
             if oid not in prefetched_objects:
                 self.pool.spawn(Downloader(self.logger, oid, account, obj.container, obj.name, user_agent, token, obj.time_stamp*multiplier).run)
+
+
+class DeleteMemory(Thread):
+
+    def __init__(self):
+        Thread.__init__(self)
+
+    def run(self):
+        global multiplier
+        print "Running thread delete..."
+        for oid in prefetched_objects:
+            data, resp_headers, time_stamp = prefetched_objects[oid]
+            if (dt.now()-time_stamp).total_seconds() >= MAX_TIME_IN_MEMORY:
+                del prefetched_objects[oid] 
+                print "Object " + oid + " deleted from memory"
+                multiplier = multiplier - 0.1
+                if multiplier < 0:
+                    multiplier = 0 
+        eventlet.sleep(10)
+        self.run()
+
 
 def filter_factory(global_config, **local_config):
 
