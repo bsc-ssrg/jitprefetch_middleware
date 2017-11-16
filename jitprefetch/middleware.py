@@ -86,9 +86,9 @@ class JITPrefetchMiddleware(object):
     def get_prefetched(self, oid, name):
         global multiplier
         if oid in prefetched_objects:
-            data, ts = prefetched_objects[oid]
+            data, diff, ts = prefetched_objects[oid]
             multiplier = multiplier + 0.05
-            self.chain.add_down_time(oid, ts)
+            self.chain.add_down_time(oid, diff)
             if multiplier > 1:
                 multiplier = 1
             if DELETE_WHEN_SERVED:
@@ -119,8 +119,8 @@ class DeleteMemory(Thread):
         global multiplier
         print "Running thread delete..."
         for oid in prefetched_objects:
-            data, resp_headers, time_stamp = prefetched_objects[oid]
-            if (dt.now()-time_stamp).total_seconds() >= MAX_TIME_IN_MEMORY:
+            data, diff, ts = prefetched_objects[oid]
+            if (dt.now()-ts).total_seconds() >= MAX_TIME_IN_MEMORY:
                 del prefetched_objects[oid] 
                 print "Object " + oid + " deleted from memory"
                 multiplier = multiplier - 0.1
@@ -182,7 +182,7 @@ class Downloader(object):
             while total_size(prefetched_objects) > MAX_PREFETCHED_SIZE:
                 self.logger.debug("MAX PREFETCHED SIZE: Deleting objects...")
                 prefetched_objects.popitem(last=True)
-            prefetched_objects[oid] = (data, diff)
+            prefetched_objects[oid] = (data, diff, dt.now())
             self.logger.debug("Object " + oid + " downloaded in " + str(diff.total_seconds()) + " seconds.")
 
 
