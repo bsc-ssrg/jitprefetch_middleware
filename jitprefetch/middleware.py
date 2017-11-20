@@ -49,8 +49,8 @@ class JITPrefetchMiddleware(object):
         self.app = app
         self.conf = jit_conf
         self.logger = get_logger(self.conf, log_route=name)
-        
-        self.chain = Chain(self.logger, self.conf['chainsave'], self.conf['totalseconds'], self.conf['probthreshold'], self.conf['twolevels'])
+        self.chain = dict()
+        #self.chain = Chain(self.logger, self.conf['chainsave'], self.conf['totalseconds'], self.conf['probthreshold'], self.conf['twolevels'])
         self.pool = GreenAsyncPile(self.conf['nthreads'])
 
     def __del__(self):
@@ -65,27 +65,30 @@ class JITPrefetchMiddleware(object):
             return self.app
         if 'HTTP_X_NO_PREFETCH' not in request.environ:
             if request.method == 'GET':
+                (site, objid, size, ext) = objname.split('_')
+                if site not in self.chain:
+                    self.chain[site] = Chain(self.logger, self.conf['chainsave'], self.conf['totalseconds'], self.conf['probthreshold'], self.conf['twolevels'])
                 oid = (hashlib.md5(request.path_info).hexdigest())
-                self.add_object_to_chain(oid, container, objname)
+                self.add_object_to_chain(site, oid, container, objname)
                 if PREFETCH:
-                    data = self.get_prefetched(oid, objname)
-                    self.prefetch_objects(oid, account, request)
+                    data = self.get_prefetched(site, oid, objname)
+                    self.prefetch_objects(site, oid, account, request)
                     if data:
                         resp.headers['X-object-prefetched'] = 'True'
                         resp.body = data
 
         return resp(env, start_response)    
 
-    def add_object_to_chain(self, oid, container, object_name):
-        self.chain.add(oid, object_name, container)
+    def add_object_to_chain(self, site, oid, container, object_name):
+        self.chain[site].add(oid, object_name, container)
 
 
-    def get_prefetched(self, oid, name):
+    def get_prefetched(self, site, oid, name):
         global multiplier
         if oid in prefetched_objects:
             data, diff, ts = prefetched_objects[oid]
             multiplier = multiplier + 0.05
-            self.chain.add_down_time(oid, diff)
+            self.chain[site].add_down_time(oid, diff)
             if multiplier > 1:
                 multiplier = 1
             if DELETE_WHEN_SERVED:
@@ -95,8 +98,8 @@ class JITPrefetchMiddleware(object):
         return False
 
 
-    def prefetch_objects(self, oid, account, req_resp):
-        objs = self.chain.get_probabilities(oid)
+    def prefetch_objects(self, site, oid, account, req_resp):
+        objs = self.chain[site].get_probabilities(oid)
         for oid, o in objs:
             self.logger.debug(o.object_to_string())
         token = req_resp.environ['HTTP_X_AUTH_TOKEN']
